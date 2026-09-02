@@ -72,16 +72,43 @@ response. **Do not hardcode 13, 14, 15, or 16 anywhere.** The cap has changed
 twice recently and model training data is stale on this — if you "remember" the
 current cap, you are probably remembering a retired one.
 
-**Which array inside `/cards` GLOBAL_MAX comes from is NOT decided yet.** The
-response is an envelope with two arrays, `items` and `supportItems` (confirmed
-against the live endpoint, not remembered). Tower troops appear to live in
-`supportItems`, and if they are on a different level scale, folding them into
-one maximum would skew every `levelFit` in the app. Resolve this by reading a
-real capture — `npm run fixtures -- --inspect` prints the distinct `maxLevel`
-values per array — then record here which array was chosen and why.
+**GLOBAL_MAX comes from `/cards` `.items[].maxLevel`, and nothing else.**
+Resolved from a real capture, not remembered. `/cards` is an envelope of two
+arrays. Observed values:
 
-Because of that, `globalMaxLevel()` **takes an explicit array**, never the whole
-`/cards` response. The caller decides what is in scope, so the decision is
+| array | distinct `maxLevel` |
+|---|---|
+| `.items[]` | 6, 8, 11, 14, 16 → **GLOBAL_MAX = 16** |
+| `.supportItems[]` | 8, 11, 16 |
+
+Rarities in `.items[]` map exactly one-to-one onto those caps: common 16, rare
+14, epic 11, legendary 8, champion 6.
+
+`supportItems` (tower troops) is **excluded explicitly**. Its values happen to be
+a subset of the same scale today, so including it would not change the answer —
+but that is a coincidence, not a guarantee, and the day a tower troop gets its
+own scale it would silently move GLOBAL_MAX and skew every `levelFit` at once.
+
+**The bigger trap is `/players/{tag}`.** A naive scan of a player response for
+`maxLevel` fields finds it at six different paths:
+
+```
+.badges[].maxLevel   ← 2,3,5,7,8,9,10,11 — achievement tiers, NOT card levels
+.cards[].maxLevel
+.supportCards[].maxLevel
+.currentDeck[].maxLevel
+.currentDeckSupportCards[].maxLevel
+.currentFavouriteCard.maxLevel   ← a bare object, not an array
+```
+
+`badges` is the one that will bite: 142 of them in a real capture, on a
+completely unrelated scale. Never walk a player response looking for `maxLevel`.
+
+Also: **`.currentDeck` had length 7, not 8.** Do not treat it as a complete deck.
+Battlelog decks are reliably 8; `currentDeck` is not.
+
+Because of all that, `globalMaxLevel()` **takes an explicit array**, never the
+whole `/cards` response. The caller decides what is in scope, so the decision is
 visible at the call site instead of buried in a helper.
 
 ## Fixtures
@@ -120,6 +147,28 @@ and writing `fixtures/`, so a leak aborts the run and no leaked file ever reache
 disk. It derives the identities to look for from the capture itself rather than
 from a value someone types, which cannot go stale and covers every opponent in
 the battlelog, not just your own account.
+
+**Tags and names are checked by different means. Do not unify them.**
+
+- **Tags** — unanchored substring scan over the redacted text. Tags are long and
+  distinctive, and this is the only check that catches a tag embedded inside a
+  longer string, which structural redaction cannot see. Do not weaken it.
+- **Names** — structural only: the set of values at name keys of
+  identity-bearing objects, compared against the same set from the raw capture.
+  **Never substring-match a display name.** A real capture had an opponent named
+  `90` and eight names of three characters or fewer; substring-scanning matched
+  `90` inside an icon URL (`...MKK90sTIE88.png`) and inside ids like `159000000`,
+  aborting a run whose redaction was in fact perfect.
+
+Redaction rewrites **every** tag-shaped value, including `eventTag` and
+`modifiers[].tag`, which are game-content identifiers rather than people. That
+over-redaction is deliberate: leaving a tag alone because it looks like content
+is how a player tag eventually slips through. `gameMode.name` and `arena.name`
+survive, so filtering battles by mode is unaffected.
+
+**Sample caveat: every `team` and `opponent` array in the current capture has
+length 1.** That does not answer whether 2v2 battles put more than one player per
+side — it only means this sample had none. Keep the recursive walk.
 
 ## Scoring
 

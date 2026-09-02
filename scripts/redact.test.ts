@@ -169,4 +169,41 @@ describe("assertNoIdentityLeak", () => {
       RedactionLeakError,
     );
   });
+
+  it("does not false-positive on very short display names", () => {
+    // Regression. A real capture had an opponent named "90" and eight names of
+    // three characters or fewer. Substring-scanning the redacted text for "90"
+    // matched inside an icon URL (...MKK90sTIE88.png) and inside ids like
+    // 159000000, aborting a run whose redaction was in fact perfect. Names must
+    // be compared structurally: value-at-a-name-key against value-at-a-name-key.
+    const raw = JSON.stringify([
+      {
+        team: [{ tag: "#AAA111", name: "90", iconUrl: "https://x.test/MKK90sTIE88.png" }],
+        opponent: [{ tag: "#BBB222", name: "GG", trophies: 9648 }],
+        cards: [{ id: 159000000, name: "Log", level: 9, maxLevel: 11 }],
+      },
+    ]);
+
+    const out = redactOne(raw);
+
+    expect(() => assertNoIdentityLeak([raw], [out])).not.toThrow();
+    // The names really were replaced; this is not passing by being lax.
+    const after = JSON.parse(out);
+    expect(after[0].team[0].name).not.toBe("90");
+    expect(after[0].opponent[0].name).not.toBe("GG");
+    // And the values that merely contain those characters are untouched.
+    expect(after[0].team[0].iconUrl).toBe("https://x.test/MKK90sTIE88.png");
+    expect(after[0].opponent[0].trophies).toBe(9648);
+    expect(after[0].cards[0].id).toBe(159000000);
+  });
+
+  it("still catches a short name that genuinely survived at a name key", () => {
+    // The structural check must not be so permissive that it misses a real leak.
+    const raw = JSON.stringify([{ team: [{ tag: "#AAA111", name: "90" }] }]);
+    const leaky = JSON.stringify([{ team: [{ tag: "#ZZZ999", name: "90" }] }]);
+
+    expect(() => assertNoIdentityLeak([raw], [leaky])).toThrow(
+      /display name\(s\) survived/,
+    );
+  });
 });

@@ -28,33 +28,48 @@ function tagsIn(bodies: readonly string[]): Set<string> {
 /**
  * Throw unless `redacted` is free of every identity present in `raw`.
  *
- * @param extraSecrets Optional override, e.g. a name that predates a rename.
- *   Derivation is the default; this only ever adds to it.
+ * Tags and names are checked by different means, and the difference is the
+ * whole point. Tags are long and distinctive, so a substring scan over the
+ * text is safe and catches a tag embedded in prose that structural redaction
+ * never sees. Display names are arbitrary and often tiny — a real capture had
+ * eight names of three characters or fewer, including "90" — so substring
+ * scanning them matches inside icon URLs, ids, and any number containing those
+ * digits. That is a false positive that aborts a clean run, so names are
+ * compared structurally instead: value-at-a-name-key against value-at-a-
+ * name-key, never as a substring of unrelated text.
+ *
+ * @param extraSecrets Optional override, e.g. a name from before a rename.
+ *   Derivation is the default; this only ever adds to it. These ARE substring
+ *   matched, since naming one is a deliberate "this string must not appear
+ *   anywhere" — so pass something distinctive, not a two-character name.
  */
 export function assertNoIdentityLeak(
   raw: readonly string[],
   redacted: readonly string[],
   extraSecrets: readonly string[] = [],
 ): void {
-  const { tags, names } = collectIdentities(raw);
-  const secrets = [...tags, ...names, ...extraSecrets].filter((s) => s.length > 0);
+  const before = collectIdentities(raw);
+  const after = collectIdentities(redacted);
   const haystack = redacted.join("\n");
 
-  // 1. Absence: no real tag or display name survives anywhere.
-  const survivors = secrets.filter((s) => haystack.includes(s));
-  if (survivors.length > 0) {
+  // --- Tags: unanchored substring scan, deliberately not weakened. ---
+
+  // 1. Absence anywhere in the text, including inside a longer string. This is
+  //    the only check that catches a tag that structural redaction cannot see,
+  //    because redaction only rewrites values that are entirely a tag.
+  const tagSurvivors = before.tags.filter((t) => haystack.includes(t));
+  if (tagSurvivors.length > 0) {
     throw new RedactionLeakError(
-      `${survivors.length} real identity value(s) survived redaction, ` +
-        `e.g. ${JSON.stringify(survivors.slice(0, 3))}. Nothing was written.`,
+      `${tagSurvivors.length} real tag(s) survived redaction, e.g. ` +
+        `${JSON.stringify(tagSurvivors.slice(0, 3))}. Nothing was written.`,
     );
   }
 
-  // 2. Disjointness: the redacted tag set shares nothing with the real one.
-  //    Listing tags alone proves nothing — placeholders are indistinguishable
-  //    from real tags by design — so this compares the two sets directly.
-  const before = tagsIn(raw);
-  const after = tagsIn(redacted);
-  const shared = [...after].filter((t) => before.has(t));
+  // 2. Token-set disjointness. Listing tags alone proves nothing — placeholders
+  //    are indistinguishable from real tags by design — so compare the sets.
+  const tagsBefore = tagsIn(raw);
+  const tagsAfter = tagsIn(redacted);
+  const shared = [...tagsAfter].filter((t) => tagsBefore.has(t));
   if (shared.length > 0) {
     throw new RedactionLeakError(
       `${shared.length} tag(s) appear in both the raw capture and the redacted ` +
@@ -65,10 +80,44 @@ export function assertNoIdentityLeak(
   // 3. Equal cardinality: catches a collapse where many real tags map onto one
   //    placeholder. That would not leak, but it would destroy the identity
   //    relationships the crawler's battle dedupe depends on.
-  if (before.size !== after.size) {
+  if (tagsBefore.size !== tagsAfter.size) {
     throw new RedactionLeakError(
-      `Redaction changed the number of distinct tags (${before.size} -> ` +
-        `${after.size}). The mapping must be one-to-one. Nothing was written.`,
+      `Redaction changed the number of distinct tags (${tagsBefore.size} -> ` +
+        `${tagsAfter.size}). The mapping must be one-to-one. Nothing was written.`,
+    );
+  }
+
+  // --- Names: structural only. Never substring. ---
+
+  // 4. No real display name is still sitting at a name key of an
+  //    identity-bearing object. collectIdentities applies the same structural
+  //    rule to both sides, so this compares like with like.
+  const realNames = new Set(before.names);
+  const nameSurvivors = after.names.filter((n) => realNames.has(n));
+  if (nameSurvivors.length > 0) {
+    throw new RedactionLeakError(
+      `${nameSurvivors.length} real display name(s) survived redaction, e.g. ` +
+        `${JSON.stringify(nameSurvivors.slice(0, 3))}. Nothing was written.`,
+    );
+  }
+
+  // 5. Equal cardinality, for the same reason as tags.
+  if (before.names.length !== after.names.length) {
+    throw new RedactionLeakError(
+      `Redaction changed the number of distinct display names ` +
+        `(${before.names.length} -> ${after.names.length}). The mapping must be ` +
+        `one-to-one. Nothing was written.`,
+    );
+  }
+
+  // --- Caller-supplied secrets: substring, opt-in. ---
+  const extraSurvivors = extraSecrets
+    .filter((s) => s.length > 0)
+    .filter((s) => haystack.includes(s));
+  if (extraSurvivors.length > 0) {
+    throw new RedactionLeakError(
+      `${extraSurvivors.length} caller-supplied secret(s) survived redaction, ` +
+        `e.g. ${JSON.stringify(extraSurvivors.slice(0, 3))}. Nothing was written.`,
     );
   }
 }
