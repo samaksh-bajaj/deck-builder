@@ -44,9 +44,20 @@ never pass the token through the API response or a client-side config object.
   **Never hardcode `api.clashroyale.com`.** The proxy exists because Supercell
   keys are IP-locked and serverless egress IPs are not stable.
 - Token from `process.env.CR_API_TOKEN`.
-- Max **5 requests/second**, enforced by one shared client. No direct `fetch()`
-  calls to the API anywhere in the codebase — every call goes through the client
-  so the rate limit is actually global rather than per-module.
+- Max **5 requests/second**, enforced by one shared client (`shared/crClient.ts`).
+  No direct `fetch()` calls to the API anywhere in the codebase — every call goes
+  through the client so the rate limit is actually global rather than per-module.
+  The limit is `CR_MAX_REQUESTS_PER_SECOND`, default 5. 5 is Supercell's ceiling,
+  so that knob is for tuning **down**, never up.
+- **Retry/backoff on 429 and 5xx is deliberately not implemented.** It belongs to
+  the crawler PR, where it can be coupled to checkpoint/resume. Do not add it
+  speculatively and do not assume it already exists. Retrying the likeliest
+  failure — a 403 from an IP-allowlist misconfiguration — would turn an instant
+  clear message into a slow confusing one.
+- Errors carry the status, request path, and the server's response body, and
+  **never the token**. `api/best-deck.ts` may surface an error message in a
+  response body, so nothing that touches the `Authorization` header may be
+  attached to a thrown error.
 
 ## Card levels
 
@@ -61,13 +72,54 @@ response. **Do not hardcode 13, 14, 15, or 16 anywhere.** The cap has changed
 twice recently and model training data is stale on this — if you "remember" the
 current cap, you are probably remembering a retired one.
 
+**Which array inside `/cards` GLOBAL_MAX comes from is NOT decided yet.** The
+response is an envelope with two arrays, `items` and `supportItems` (confirmed
+against the live endpoint, not remembered). Tower troops appear to live in
+`supportItems`, and if they are on a different level scale, folding them into
+one maximum would skew every `levelFit` in the app. Resolve this by reading a
+real capture — `npm run fixtures -- --inspect` prints the distinct `maxLevel`
+values per array — then record here which array was chosen and why.
+
+Because of that, `globalMaxLevel()` **takes an explicit array**, never the whole
+`/cards` response. The caller decides what is in scope, so the decision is
+visible at the call site instead of buried in a helper.
+
 ## Fixtures
 
 **Never write a parser against a guessed API response shape.** Real responses
 live in `fixtures/`. Read the fixture before writing the parser. If no fixture
-exists for the endpoint you need, capture one first with a script under
-`scripts/`. A hand-written fixture that merely looks plausible is worse than
-none: nobody can later tell it from a real capture.
+exists for the endpoint you need, capture one first with `npm run fixtures`. A
+hand-written fixture that merely looks plausible is worse than none: nobody can
+later tell it from a real capture.
+
+`npm run fixtures -- --inspect` prints a structural summary of what was
+captured — every path, its types, array lengths, and the full value set for
+low-cardinality fields. It discovers keys rather than assuming them, so reading
+a response is a command rather than a discipline. Use it before writing a parser.
+
+**Two directories, and the distinction matters:**
+
+- `.captures/` — gitignored, byte-exact, the raw truth. Never committed.
+- `fixtures/` — committed, with player tags and display names redacted.
+
+Fixtures go to a public repo, so **identities are always redacted**. Redaction is
+structure-preserving: key order and every non-identifying value (levels,
+`maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep the real
+charset and length so they exercise parsing realistically. The one deviation from
+byte-equality is that redaction re-serializes, normalizing insignificant
+whitespace; `.captures/` remains the byte-exact copy. Fabricating any other field
+is still forbidden.
+
+Identity-bearing objects are recognised **structurally** — an object carrying a
+tag-shaped value is a player or clan — rather than from a hardcoded list of
+paths. That is what keeps the redactor honest: it works on an endpoint nobody has
+looked at yet, and it does not strip card names, which carry no tag.
+
+The leak check runs **inside** `dump-fixtures.ts`, between redacting in memory
+and writing `fixtures/`, so a leak aborts the run and no leaked file ever reaches
+disk. It derives the identities to look for from the capture itself rather than
+from a value someone types, which cannot go stale and covers every opponent in
+the battlelog, not just your own account.
 
 ## Scoring
 
