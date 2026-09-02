@@ -67,6 +67,16 @@ The API returns **rarity-relative** levels, not the levels shown in-game:
 displayed = card.level + (GLOBAL_MAX - card.maxLevel)
 ```
 
+**This formula is verified against the live game, not assumed.** Five maxed
+cards spanning all five rarities — raw levels 16, 14, 11, 8 and 6 — were checked
+against what the game displays, and all five show as 16. That is the whole
+question: five different raw levels collapsing onto one displayed number is what
+the offset term exists to do, and a same-rarity sample could not have shown it.
+
+**Do not reopen this.** If a level looks wrong somewhere, the bug is in the
+caller — most likely a `maxLevel` pulled from the wrong array (see below) — not
+in this line. Re-derive it only if `npm run levels` disagrees with a phone.
+
 `GLOBAL_MAX` is derived at runtime as the maximum `maxLevel` across the `/cards`
 response. **Do not hardcode 13, 14, 15, or 16 anywhere.** The cap has changed
 twice recently and model training data is stale on this — if you "remember" the
@@ -216,6 +226,31 @@ fetches `/players/{tag}/battlelog` for each, and aggregates. Each battlelog hold
 ~25 battles and every battle contains BOTH players' full 8-card decks plus the
 outcome, so one request yields ~50 deck observations. Battles appear in both
 players' logs, so dedupe on `(battleTime, sorted player tags)` before counting.
+
+**Not every battle is a meta battle, and the crawler must filter.** Novelty and
+event modes hand out decks, cap elixir differently, or apply card modifiers, so
+their outcomes say nothing about what wins on ladder. Counting them pollutes
+both usage and win rate.
+
+A real 30-battle capture split like this:
+
+| `type` | `gameMode.name` | battles |
+|---|---|---|
+| `pathOfLegend` | `Ranked1v1_NewArena` | 20 |
+| `trail` | `Crazy_Arena_InfiniteElixir` | 10 |
+
+A third of that sample was unusable. All ten `trail` battles also carried a
+non-empty `modifiers` array and an `eventTag`, so there are three correlated
+signals to filter on — but which combination is correct is **not decided here**.
+Read a real capture and choose from what it actually contains:
+
+```
+npm run fixtures -- '#YOURTAG'
+npm run fixtures -- --inspect
+```
+
+Do not filter from a remembered list of mode names. They change with every
+season, and the names above are one account's sample, not the full set.
 
 Decks are canonicalized by sorting the 8 card IDs and hashing the tuple. Tower
 troop and evolution slots are stored in separate fields, **not** folded into the
