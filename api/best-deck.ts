@@ -3,7 +3,7 @@
 // This handler exists only to prove that a plain Vite project on Vercel serves a
 // top-level /api function with zero configuration. It deliberately does NOT call
 // the Supercell API and does NOT read process.env.CR_API_TOKEN.
-import decksFile from "../public/decks.json";
+import decksFile from "../public/decks.json" with { type: "json" };
 import type { BestDeckResponse, DeckSource } from "../shared/types";
 
 export default {

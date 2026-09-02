@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import decksFile from "../public/decks.json";
+import decksFile from "../public/decks.json" with { type: "json" };
 import type { DeckSource } from "./types";
 
 // Proves the test runner, tsconfig, and cross-directory imports resolve. It is

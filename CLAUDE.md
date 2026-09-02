@@ -134,6 +134,25 @@ Vercel functions use the Web-standard signature
 (`export default { fetch(request: Request) }`), so there is no `@vercel/node`
 dependency.
 
+## Runtime gotchas
+
+**JSON imports in `api/` require an import attribute:**
+
+```ts
+import decksFile from "../public/decks.json" with { type: "json" };
+```
+
+Without it, the function crashes at cold start with
+`ERR_IMPORT_ATTRIBUTE_MISSING` — Node's ESM loader, which is what actually runs
+on Vercel, requires the attribute. Vite and vitest resolve JSON themselves and
+never needed it, so **local `npm test` and `npm run build` pass either way**;
+this only shows up in a real deploy. Both tolerate the attribute, so use it
+everywhere for consistency. **This applies to `cards.json` when it lands too.**
+
+Do not work around this by reading the file with `fs`. The static import is what
+causes Vercel's tracer to include the JSON in the function bundle; switching to
+`fs` trades a loud cold-start crash for a missing file at runtime.
+
 ## Workflow
 
 - Every change goes on a branch and through a PR. **Never commit to main.**
