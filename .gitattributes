@@ -1,3 +1,4 @@
 package-lock.json linguist-generated=true
 public/decks.json linguist-generated=true
 public/cards.json linguist-generated=true
+fixtures/*.json linguist-generated=true
