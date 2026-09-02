@@ -104,8 +104,11 @@ own scale it would silently move GLOBAL_MAX and skew every `levelFit` at once.
 `badges` is the one that will bite: 142 of them in a real capture, on a
 completely unrelated scale. Never walk a player response looking for `maxLevel`.
 
-Also: **`.currentDeck` had length 7, not 8.** Do not treat it as a complete deck.
-Battlelog decks are reliably 8; `currentDeck` is not.
+Also: **`.currentDeck` is live state, not a reliable deck.** It was length 7 in
+one capture and 8 in the next from the same account, so it reflects whatever the
+player is mid-edit on. Never treat it as a complete 8-card deck, and never seed
+deck data from it. Battlelog decks are reliably 8 and are what the crawler
+aggregates.
 
 Because of all that, `globalMaxLevel()` **takes an explicit array**, never the
 whole `/cards` response. The caller decides what is in scope, so the decision is

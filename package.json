@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "fixtures": "tsx --env-file-if-exists=.env scripts/dump-fixtures.ts"
+    "fixtures": "tsx --env-file-if-exists=.env scripts/dump-fixtures.ts",
+    "levels": "tsx scripts/card-levels.ts"
   },
   "dependencies": {
     "react": "^19.2.8",
