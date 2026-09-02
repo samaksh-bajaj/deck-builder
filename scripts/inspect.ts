@@ -53,6 +53,12 @@ function visit(value: Json, path: string, nodes: Map<string, Node>): void {
   if (node.values.size <= MAX_DISTINCT) node.values.add(value);
 }
 
+/** Shorten one value for display, marking the cut so nothing is silently lost. */
+function shorten(value: Json): string {
+  const text = JSON.stringify(value) ?? "null";
+  return text.length <= 24 ? text : `${text.slice(0, 23)}…"`;
+}
+
 function describe(node: Node): string {
   const parts = [[...node.types].join("|"), `x${node.count}`];
 
@@ -67,12 +73,18 @@ function describe(node: Node): string {
 
   if (node.values.size > 0 && node.values.size <= MAX_DISTINCT) {
     const values = [...node.values];
+    // Every value is shown, never silently truncated. An earlier version sliced
+    // strings to the first four with no marker, which made a five-value rarity
+    // field read as four and hid the existence of champion cards entirely.
+    // Long strings are shortened individually, with an explicit ellipsis.
     const numeric = values.every((v) => typeof v === "number");
-    // Numbers are what the level questions hinge on, so show them all, sorted.
-    if (numeric) parts.push(`= ${(values as number[]).sort((a, b) => a - b).join(",")}`);
-    else parts.push(`= ${values.map((v) => JSON.stringify(v)).slice(0, 4).join(",")}`);
+    if (numeric) {
+      parts.push(`= ${(values as number[]).sort((a, b) => a - b).join(",")}`);
+    } else {
+      parts.push(`= ${values.map(shorten).join(",")}`);
+    }
   } else if (node.values.size > MAX_DISTINCT) {
-    parts.push(`= <${node.values.size}+ distinct>`);
+    parts.push(`= <more than ${MAX_DISTINCT} distinct values>`);
   }
 
   return parts.join("  ");

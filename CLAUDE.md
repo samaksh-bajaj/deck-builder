@@ -72,42 +72,89 @@ response. **Do not hardcode 13, 14, 15, or 16 anywhere.** The cap has changed
 twice recently and model training data is stale on this — if you "remember" the
 current cap, you are probably remembering a retired one.
 
-**Which array inside `/cards` GLOBAL_MAX comes from is NOT decided yet.** The
-response is an envelope with two arrays, `items` and `supportItems` (confirmed
-against the live endpoint, not remembered). Tower troops appear to live in
-`supportItems`, and if they are on a different level scale, folding them into
-one maximum would skew every `levelFit` in the app. Resolve this by reading a
-real capture — `npm run fixtures -- --inspect` prints the distinct `maxLevel`
-values per array — then record here which array was chosen and why.
+**GLOBAL_MAX comes from `/cards` `.items[].maxLevel`, and nothing else.**
+Resolved from a real capture, not remembered. `/cards` is an envelope of two
+arrays. Observed values:
 
-Because of that, `globalMaxLevel()` **takes an explicit array**, never the whole
-`/cards` response. The caller decides what is in scope, so the decision is
+| array | distinct `maxLevel` |
+|---|---|
+| `.items[]` | 6, 8, 11, 14, 16 → **GLOBAL_MAX = 16** |
+| `.supportItems[]` | 8, 11, 16 |
+
+Rarities in `.items[]` map exactly one-to-one onto those caps: common 16, rare
+14, epic 11, legendary 8, champion 6.
+
+`supportItems` (tower troops) is **excluded explicitly**. Its values happen to be
+a subset of the same scale today, so including it would not change the answer —
+but that is a coincidence, not a guarantee, and the day a tower troop gets its
+own scale it would silently move GLOBAL_MAX and skew every `levelFit` at once.
+
+**The bigger trap is `/players/{tag}`.** A naive scan of a player response for
+`maxLevel` fields finds it at six different paths:
+
+```
+.badges[].maxLevel   ← 2,3,5,7,8,9,10,11 — achievement tiers, NOT card levels
+.cards[].maxLevel
+.supportCards[].maxLevel
+.currentDeck[].maxLevel
+.currentDeckSupportCards[].maxLevel
+.currentFavouriteCard.maxLevel   ← a bare object, not an array
+```
+
+`badges` is the one that will bite: 142 of them in a real capture, on a
+completely unrelated scale. Never walk a player response looking for `maxLevel`.
+
+Also: **`.currentDeck` had length 7, not 8.** Do not treat it as a complete deck.
+Battlelog decks are reliably 8; `currentDeck` is not.
+
+Because of all that, `globalMaxLevel()` **takes an explicit array**, never the
+whole `/cards` response. The caller decides what is in scope, so the decision is
 visible at the call site instead of buried in a helper.
 
 ## Fixtures
 
-**Never write a parser against a guessed API response shape.** Real responses
-live in `fixtures/`. Read the fixture before writing the parser. If no fixture
-exists for the endpoint you need, capture one first with `npm run fixtures`. A
-hand-written fixture that merely looks plausible is worse than none: nobody can
-later tell it from a real capture.
+**Never write a parser against a guessed API response shape.** Read a real
+capture first. PII-free captures are committed to `fixtures/`; everything else
+lives in gitignored `.captures/` and you produce it yourself with
+`npm run fixtures -- '#YOURTAG'`. A hand-written file that merely looks plausible
+is worse than none: nobody can later tell it from a real capture.
 
 `npm run fixtures -- --inspect` prints a structural summary of what was
 captured — every path, its types, array lengths, and the full value set for
 low-cardinality fields. It discovers keys rather than assuming them, so reading
 a response is a command rather than a discipline. Use it before writing a parser.
 
+**`fixtures/` holds only responses with no personal data.** Today that is
+`cards.json` and nothing else. Player and battlelog captures are **never
+committed, not even redacted** — they are a snapshot of one arbitrary account
+plus ~59 strangers, and they buy nothing that a local capture does not. Anyone
+working on this repo generates their own with `npm run fixtures`.
+
+`fixtures/player.json` and `fixtures/player-battlelog.json` are gitignored so
+they cannot be committed by accident, and `scripts/fixtures.test.ts` fails CI if
+anything outside the allowlist appears in `fixtures/` — `.gitignore` alone is a
+convention, a failing test is a rule.
+
 **Two directories, and the distinction matters:**
 
 - `.captures/` — gitignored, byte-exact, the raw truth. Never committed.
-- `fixtures/` — committed, with player tags and display names redacted.
+- `fixtures/` — committed, PII-free captures only, redacted regardless.
 
-Fixtures go to a public repo, so **identities are always redacted**. Redaction is
-structure-preserving: key order and every non-identifying value (levels,
-`maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep the real
-charset and length so they exercise parsing realistically. The one deviation from
-byte-equality is that redaction re-serializes, normalizing insignificant
-whitespace; `.captures/` remains the byte-exact copy. Fabricating any other field
+The redaction pipeline and leak check still apply to everything. They are what
+make the local `.captures/` files safe to hand to someone on request.
+
+**Tests that need a player or battlelog shape cannot read a committed capture,
+because there isn't one.** Use `testdata/synthetic-*.json` — hand-built,
+structurally derived from a real capture, and labelled synthetic in the filename
+and in a `_synthetic` key so it can never be mistaken for one. Never move a
+synthetic file into `fixtures/`, and never write a parser against it: it proves
+a parser handles a shape, it does not establish what the shape is.
+
+Redaction is structure-preserving: key order and every non-identifying value
+(levels, `maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep
+the real charset and length so they exercise parsing realistically. The one
+deviation from byte-equality is that redaction re-serializes, normalizing
+insignificant whitespace; `.captures/` remains the byte-exact copy. Fabricating any other field
 is still forbidden.
 
 Identity-bearing objects are recognised **structurally** — an object carrying a
@@ -120,6 +167,28 @@ and writing `fixtures/`, so a leak aborts the run and no leaked file ever reache
 disk. It derives the identities to look for from the capture itself rather than
 from a value someone types, which cannot go stale and covers every opponent in
 the battlelog, not just your own account.
+
+**Tags and names are checked by different means. Do not unify them.**
+
+- **Tags** — unanchored substring scan over the redacted text. Tags are long and
+  distinctive, and this is the only check that catches a tag embedded inside a
+  longer string, which structural redaction cannot see. Do not weaken it.
+- **Names** — structural only: the set of values at name keys of
+  identity-bearing objects, compared against the same set from the raw capture.
+  **Never substring-match a display name.** A real capture had an opponent named
+  `90` and eight names of three characters or fewer; substring-scanning matched
+  `90` inside an icon URL (`...MKK90sTIE88.png`) and inside ids like `159000000`,
+  aborting a run whose redaction was in fact perfect.
+
+Redaction rewrites **every** tag-shaped value, including `eventTag` and
+`modifiers[].tag`, which are game-content identifiers rather than people. That
+over-redaction is deliberate: leaving a tag alone because it looks like content
+is how a player tag eventually slips through. `gameMode.name` and `arena.name`
+survive, so filtering battles by mode is unaffected.
+
+**Sample caveat: every `team` and `opponent` array in the current capture has
+length 1.** That does not answer whether 2v2 battles put more than one player per
+side — it only means this sample had none. Keep the recursive walk.
 
 ## Scoring
 
