@@ -113,28 +113,48 @@ visible at the call site instead of buried in a helper.
 
 ## Fixtures
 
-**Never write a parser against a guessed API response shape.** Real responses
-live in `fixtures/`. Read the fixture before writing the parser. If no fixture
-exists for the endpoint you need, capture one first with `npm run fixtures`. A
-hand-written fixture that merely looks plausible is worse than none: nobody can
-later tell it from a real capture.
+**Never write a parser against a guessed API response shape.** Read a real
+capture first. PII-free captures are committed to `fixtures/`; everything else
+lives in gitignored `.captures/` and you produce it yourself with
+`npm run fixtures -- '#YOURTAG'`. A hand-written file that merely looks plausible
+is worse than none: nobody can later tell it from a real capture.
 
 `npm run fixtures -- --inspect` prints a structural summary of what was
 captured — every path, its types, array lengths, and the full value set for
 low-cardinality fields. It discovers keys rather than assuming them, so reading
 a response is a command rather than a discipline. Use it before writing a parser.
 
+**`fixtures/` holds only responses with no personal data.** Today that is
+`cards.json` and nothing else. Player and battlelog captures are **never
+committed, not even redacted** — they are a snapshot of one arbitrary account
+plus ~59 strangers, and they buy nothing that a local capture does not. Anyone
+working on this repo generates their own with `npm run fixtures`.
+
+`fixtures/player.json` and `fixtures/player-battlelog.json` are gitignored so
+they cannot be committed by accident, and `scripts/fixtures.test.ts` fails CI if
+anything outside the allowlist appears in `fixtures/` — `.gitignore` alone is a
+convention, a failing test is a rule.
+
 **Two directories, and the distinction matters:**
 
 - `.captures/` — gitignored, byte-exact, the raw truth. Never committed.
-- `fixtures/` — committed, with player tags and display names redacted.
+- `fixtures/` — committed, PII-free captures only, redacted regardless.
 
-Fixtures go to a public repo, so **identities are always redacted**. Redaction is
-structure-preserving: key order and every non-identifying value (levels,
-`maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep the real
-charset and length so they exercise parsing realistically. The one deviation from
-byte-equality is that redaction re-serializes, normalizing insignificant
-whitespace; `.captures/` remains the byte-exact copy. Fabricating any other field
+The redaction pipeline and leak check still apply to everything. They are what
+make the local `.captures/` files safe to hand to someone on request.
+
+**Tests that need a player or battlelog shape cannot read a committed capture,
+because there isn't one.** Use `testdata/synthetic-*.json` — hand-built,
+structurally derived from a real capture, and labelled synthetic in the filename
+and in a `_synthetic` key so it can never be mistaken for one. Never move a
+synthetic file into `fixtures/`, and never write a parser against it: it proves
+a parser handles a shape, it does not establish what the shape is.
+
+Redaction is structure-preserving: key order and every non-identifying value
+(levels, `maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep
+the real charset and length so they exercise parsing realistically. The one
+deviation from byte-equality is that redaction re-serializes, normalizing
+insignificant whitespace; `.captures/` remains the byte-exact copy. Fabricating any other field
 is still forbidden.
 
 Identity-bearing objects are recognised **structurally** — an object carrying a

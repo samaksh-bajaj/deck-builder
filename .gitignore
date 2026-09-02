@@ -8,3 +8,8 @@ dist
 !.env.example
 
 .captures
+
+# fixtures/ holds only responses with no personal data. Player and battlelog
+# captures stay local; generate your own with `npm run fixtures`.
+fixtures/player.json
+fixtures/player-battlelog.json
