@@ -183,6 +183,8 @@ describe("buildCollection", () => {
 
 /** Real catalogue ids the synthetic player does not own. */
 const BALLOON = 26000006;
+const WITCH = 26000007;
+const ICE_WIZARD = 26000023;
 
 /** Inline decks, so no assertion here depends on public/decks.json's contents. */
 function deck(cards: number[], wins = 600, losses = 400): Deck {
@@ -190,17 +192,23 @@ function deck(cards: number[], wins = 600, losses = 400): Deck {
 }
 const FULLY_OWNED = [26000000, 26000001, 26000003, 26000004, 26000005, 26000009, 26000014, 26000023]; // prettier-ignore
 const ONE_MISSING = [26000000, 26000001, 26000003, 26000004, 26000005, BALLOON, 26000009, 26000014]; // prettier-ignore
+const TWO_MISSING = [26000000, 26000001, 26000003, 26000004, 26000005, BALLOON, WITCH, 26000009]; // prettier-ignore
 const UNKNOWN_CARD = [...FULLY_OWNED.slice(0, 7), 99999999];
 
 /**
- * The invariant this module exists to protect: a recommended deck is one the
- * player can actually build. Recommending a deck someone cannot build is the
- * single worst output this app can produce, so it is asserted rather than
- * reasoned about.
+ * The invariant this module exists to protect: every card in a recommended deck
+ * is either one the player owns or one named in `missing`. Silently returning a
+ * deck someone cannot build is the single worst output this app can produce, so
+ * it is asserted rather than reasoned about.
  */
 function expectNeverUnbuildable(result: Recommendation, owned: Collection): void {
   if (result.status === "none") return;
-  for (const id of result.deck.deck.cards) expect(owned.levels.has(id)).toBe(true);
+
+  const flagged = new Set(result.deck.missing.map((card) => card.id));
+  for (const id of result.deck.deck.cards) {
+    expect(owned.levels.has(id) || flagged.has(id)).toBe(true);
+  }
+  expect(result.deck.missing).toHaveLength(result.status === "ok" ? 0 : 1);
 }
 
 describe("recommendDeck", () => {
@@ -222,20 +230,67 @@ describe("recommendDeck", () => {
     expect(result.deck.deck).toBe(better);
   });
 
-  it("filters out a deck with a card the player lacks rather than scoring it zero", () => {
+  it("filters out a deck with cards the player lacks rather than scoring it zero", () => {
     // Scored as zero it could still win a comparison against other zeros. The
-    // answer is that it is not a candidate at all.
-    const result = recommendDeck([deck(ONE_MISSING)], collection, items);
+    // answer is that it is not a candidate at all. Two missing, so the relaxed
+    // tier does not pick it up either.
+    const result = recommendDeck([deck(TWO_MISSING)], collection, items);
 
     expect(result.status).toBe("none");
-    expect(result.counts).toMatchObject({ total: 1, buildable: 0, unknownCard: 0 });
+    expect(result.counts).toMatchObject({ total: 1, buildable: 0, oneCardShort: 0 });
   });
 
   it("gives a clear message rather than throwing when nothing fits", () => {
-    const result = recommendDeck([deck(ONE_MISSING)], collection, items);
+    const result = recommendDeck([deck(TWO_MISSING)], collection, items);
 
     if (result.status !== "none") return;
-    expect(result.message).toMatch(/card you do not own/);
+    expect(result.message).toMatch(/one missing card/);
+  });
+
+  it("falls back to one missing card, naming it and what unlocking it gives", () => {
+    const result = recommendDeck([deck(ONE_MISSING)], collection, items);
+
+    expect(result.status).toBe("relaxed");
+    expectNeverUnbuildable(result, collection);
+    if (result.status !== "relaxed") return;
+    // Balloon is an epic, so unlocking it starts it well above a fresh common.
+    // A bare 1 in the exponent would price the two identically; this pins that
+    // the penalty is applied on the displayed scale.
+    expect(result.deck.missing[0]).toEqual({
+      id: BALLOON,
+      name: "Balloon",
+      displayedLevelIfUnlocked: 1 + (globalMax - 11),
+    });
+  });
+
+  it("prefers a buildable deck over a one-card-short one, whatever their scores", () => {
+    // The tiers are a ladder, not a comparison. Give the unbuildable deck a far
+    // better record, so a plain sort by score would pick the wrong one.
+    const result = recommendDeck(
+      [deck(ONE_MISSING, 990, 10), deck(FULLY_OWNED, 501, 499)],
+      collection,
+      items,
+    );
+
+    expect(result.status).toBe("ok");
+    expectNeverUnbuildable(result, collection);
+  });
+
+  it("ranks a deck above the same deck with one of its cards missing", () => {
+    // Same 8 slots, same record, two collections. This is the property that a
+    // penalty averaging only the 7 owned cards would invert, since dropping the
+    // weakest slot raises a mean.
+    const without = buildCollection(
+      player.cards.filter((card) => card.id !== ICE_WIZARD),
+      globalMax,
+    );
+    const owned = recommendDeck([deck(FULLY_OWNED)], collection, items);
+    const short = recommendDeck([deck(FULLY_OWNED)], without, items);
+
+    expect(owned.status).toBe("ok");
+    expect(short.status).toBe("relaxed");
+    if (owned.status === "none" || short.status === "none") return;
+    expect(owned.deck.score).toBeGreaterThan(short.deck.score);
   });
 
   it("never lets a deck qualify by having too little data", () => {
@@ -262,16 +317,23 @@ describe("recommendDeck", () => {
     // If a crawler regression drops volume, this is the number that shows it
     // instead of the site quietly recommending from a pool of one.
     const result = recommendDeck(
-      [deck(FULLY_OWNED), deck(FULLY_OWNED, 10, 10), deck(ONE_MISSING), deck(UNKNOWN_CARD)],
+      [
+        deck(FULLY_OWNED),
+        deck(FULLY_OWNED, 10, 10),
+        deck(ONE_MISSING),
+        deck(TWO_MISSING),
+        deck(UNKNOWN_CARD),
+      ],
       collection,
       items,
     );
 
     expect(result.counts).toEqual({
-      total: 4,
+      total: 5,
       belowMinBattles: 1,
       unknownCard: 1,
       buildable: 1,
+      oneCardShort: 1,
     });
   });
 });
@@ -281,10 +343,10 @@ describe("against the real public/decks.json", () => {
   // asserting which deck wins, or that one is found at all, would fail the day
   // the data changes rather than the day this code breaks.
 
-  it("returns a known status and never a deck the player cannot build", () => {
+  it("returns a known status and never an unbuildable deck without saying so", () => {
     const result = recommendDeck(decksFile.decks, collection, items);
 
-    expect(["ok", "none"]).toContain(result.status);
+    expect(["ok", "relaxed", "none"]).toContain(result.status);
     expectNeverUnbuildable(result, collection);
     expect(result.counts.total).toBe(decksFile.decks.length);
   });

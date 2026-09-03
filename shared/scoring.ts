@@ -156,6 +156,13 @@ export interface CatalogueCard {
   maxLevel: number;
 }
 
+/** A deck card the player does not own, and what unlocking it would give them. */
+export interface MissingCard {
+  id: number;
+  name: string;
+  displayedLevelIfUnlocked: number;
+}
+
 /** How the candidate pool narrowed. Every deck that fell out is counted here. */
 export interface SelectionCounts {
   total: number;
@@ -165,6 +172,8 @@ export interface SelectionCounts {
   unknownCard: number;
   /** Cleared the battle gate and the player owns all 8. */
   buildable: number;
+  /** Cleared the battle gate and the player owns exactly 7 of 8. */
+  oneCardShort: number;
 }
 
 export interface ScoredDeck {
@@ -172,33 +181,52 @@ export interface ScoredDeck {
   score: number;
   quality: number;
   levelFit: number;
+  /** Empty for a deck the player can build outright. */
+  missing: MissingCard[];
 }
 
 export type Recommendation =
   | { status: "ok"; deck: ScoredDeck; counts: SelectionCounts }
+  | { status: "relaxed"; deck: ScoredDeck; counts: SelectionCounts }
   | { status: "none"; message: string; counts: SelectionCounts };
 
 /**
- * Why a deck is not a candidate, or its 8 displayed levels if it is.
- *
- * "unknown" means the deck names a card the catalogue has never heard of, which
- * is a different problem from the player not owning it: it means decks.json and
+ * The deck's 8 displayed levels and the cards the player is missing, or
+ * "unknown" if it names a card the catalogue has never heard of — a different
+ * problem from the player not owning it, since it means decks.json and
  * cards.json are out of sync. Kept apart so the counts can say which happened.
+ *
+ * A missing card is priced at what the player would have the moment they
+ * unlocked it: level 1 **on the displayed scale**, via `displayedLevel`. That
+ * matters — an unlocked Champion starts far above an unlocked Common, so a bare
+ * 1 in the exponent would punish the two identically when the game does not.
+ * The term enters both halves of `levelFit`, keeping it a blend over all 8 so
+ * that dropping a slot can never raise a deck's score.
  */
 function resolveDeck(
   deck: Deck,
   collection: Collection,
   catalogue: ReadonlyMap<number, CatalogueCard>,
-): number[] | "unowned" | "unknown" {
+): { levels: number[]; missing: MissingCard[] } | "unknown" {
   const levels: number[] = [];
+  const missing: MissingCard[] = [];
 
   for (const id of deck.cards) {
     const owned = collection.levels.get(id);
-    if (owned === undefined) return catalogue.has(id) ? "unowned" : "unknown";
-    levels.push(owned);
+    if (owned !== undefined) {
+      levels.push(owned);
+      continue;
+    }
+
+    const card = catalogue.get(id);
+    if (card === undefined) return "unknown";
+
+    const unlocked = displayedLevel({ level: 1, maxLevel: card.maxLevel }, collection.globalMax);
+    levels.push(unlocked);
+    missing.push({ id, name: card.name, displayedLevelIfUnlocked: unlocked });
   }
 
-  return levels;
+  return { levels, missing };
 }
 
 /**
@@ -210,9 +238,10 @@ function resolveDeck(
  * comparison against other zeros, and recommending a deck someone cannot build
  * is the single worst output this app can produce.
  *
- * CLAUDE.md's fallback ladder — relax to allow one missing card before giving up
- * — is not here yet. Until it lands this returns "none" where it would relax,
- * which is the safe direction to be incomplete in.
+ * The ladder then goes strict, then one-card-short, then gives up. It is a
+ * ladder and not a comparison: a deck the player owns outright always wins over
+ * a better-performing one they cannot build. A deck is never returned without
+ * `missing` naming exactly what is needed to field it.
  */
 export function recommendDeck(
   decks: readonly Deck[],
@@ -225,8 +254,10 @@ export function recommendDeck(
     belowMinBattles: 0,
     unknownCard: 0,
     buildable: 0,
+    oneCardShort: 0,
   };
-  const candidates: ScoredDeck[] = [];
+  const strict: ScoredDeck[] = [];
+  const oneShort: ScoredDeck[] = [];
 
   for (const deck of decks) {
     if (deck.wins + deck.losses < MIN_BATTLES) {
@@ -234,33 +265,43 @@ export function recommendDeck(
       continue;
     }
 
-    const levels = resolveDeck(deck, collection, byId);
-    if (levels === "unknown") {
+    const resolved = resolveDeck(deck, collection, byId);
+    if (resolved === "unknown") {
       counts.unknownCard++;
       continue;
     }
-    if (levels === "unowned") continue;
+    if (resolved.missing.length > 1) continue;
 
-    counts.buildable++;
     const quality = wilsonLowerBound(deck.wins, deck.losses);
-    const fit = levelFit(levels, collection.globalMax);
-    candidates.push({ deck, score: score(quality, fit), quality, levelFit: fit });
+    const fit = levelFit(resolved.levels, collection.globalMax);
+    const scored: ScoredDeck = {
+      deck,
+      score: score(quality, fit),
+      quality,
+      levelFit: fit,
+      missing: resolved.missing,
+    };
+
+    if (resolved.missing.length === 0) {
+      counts.buildable++;
+      strict.push(scored);
+    } else {
+      counts.oneCardShort++;
+      oneShort.push(scored);
+    }
   }
 
-  if (candidates.length === 0) {
-    return {
-      status: "none",
-      message:
-        `No deck is buildable from your collection. Of ${counts.total} decks, ` +
-        `${counts.belowMinBattles} had too few battles to rank and the rest need at ` +
-        "least one card you do not own.",
-      counts,
-    };
-  }
+  const best = (candidates: ScoredDeck[]) => candidates.reduce((a, b) => (b.score > a.score ? b : a));
+
+  if (strict.length > 0) return { status: "ok", deck: best(strict), counts };
+  if (oneShort.length > 0) return { status: "relaxed", deck: best(oneShort), counts };
 
   return {
-    status: "ok",
-    deck: candidates.reduce((a, b) => (b.score > a.score ? b : a)),
+    status: "none",
+    message:
+      `No deck fits your collection, even allowing one missing card. Of ${counts.total} ` +
+      `decks, ${counts.belowMinBattles} had too few battles to rank and the rest needed ` +
+      "more than one card you do not own.",
     counts,
   };
 }
