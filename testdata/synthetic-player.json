@@ -1,0 +1,39 @@
+{
+  "_synthetic": true,
+  "_note": "Hand-built, NOT a capture. Structurally derived from a real /players/{tag} response: key order, the seven distinct cards[] key-sets, the iconUrls variants, the one card with no elixirCost, count:0 on an owned card, badges[] carrying maxLevel on the achievement scale, and currentDeck at length 7. Card ids, names and maxLevels are real catalogue values so this stays consistent with fixtures/cards.json; every player-identifying value is fake. It proves a parser handles the shape. It does not establish what the shape is - for that, run npm run fixtures and read a real one.",
+  "tag": "#SYNTHETIC0",
+  "name": "Synthetic Player",
+  "expLevel": 42,
+  "trophies": 6200,
+  "badges": [
+    { "name": "Classic12Wins", "level": 1, "maxLevel": 5, "progress": 12 },
+    { "name": "LadderTournamentTop1000", "level": 3, "maxLevel": 11, "progress": 812 }
+  ],
+  "cards": [
+    { "name": "Knight", "id": 26000000, "level": 11, "starLevel": 2, "evolutionLevel": 1, "maxLevel": 16, "maxEvolutionLevel": 1, "rarity": "common", "count": 0, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-knight.png", "heroMedium": "https://api-assets.clashroyale.com/cardhero/300/synthetic-knight.png", "evolutionMedium": "https://api-assets.clashroyale.com/cards/300/synthetic-knight-ev1.png" } },
+    { "name": "Archers", "id": 26000001, "level": 14, "evolutionLevel": 1, "maxLevel": 16, "maxEvolutionLevel": 1, "rarity": "common", "count": 118, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-archers.png", "evolutionMedium": "https://api-assets.clashroyale.com/cards/300/synthetic-archers-ev1.png" } },
+    { "name": "Minions", "id": 26000005, "level": 16, "maxLevel": 16, "rarity": "common", "count": 3402, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-minions.png" } },
+    { "name": "Giant", "id": 26000003, "level": 9, "starLevel": 1, "maxLevel": 14, "rarity": "rare", "count": 47, "elixirCost": 5, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-giant.png", "heroMedium": "https://api-assets.clashroyale.com/cardhero/300/synthetic-giant.png" } },
+    { "name": "Musketeer", "id": 26000014, "level": 14, "maxLevel": 14, "maxEvolutionLevel": 1, "rarity": "rare", "count": 906, "elixirCost": 4, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-musketeer.png" } },
+    { "name": "P.E.K.K.A", "id": 26000004, "level": 6, "maxLevel": 11, "rarity": "epic", "count": 8, "elixirCost": 7, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-pekka.png" } },
+    { "name": "Golem", "id": 26000009, "level": 11, "maxLevel": 11, "rarity": "epic", "count": 214, "elixirCost": 8, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-golem.png" } },
+    { "name": "Mirror", "id": 28000006, "level": 4, "maxLevel": 11, "rarity": "epic", "count": 2, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-mirror.png" } },
+    { "name": "Ice Wizard", "id": 26000023, "level": 3, "maxLevel": 8, "rarity": "legendary", "count": 1, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-ice-wizard.png" } },
+    { "name": "Miner", "id": 26000032, "level": 8, "maxLevel": 8, "rarity": "legendary", "count": 63, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-miner.png" } },
+    { "name": "Archer Queen", "id": 26000072, "level": 2, "maxLevel": 6, "rarity": "champion", "count": 0, "elixirCost": 5, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-archer-queen.png" } },
+    { "name": "Golden Knight", "id": 26000074, "level": 6, "maxLevel": 6, "rarity": "champion", "count": 19, "elixirCost": 4, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-golden-knight.png" } }
+  ],
+  "supportCards": [
+    { "name": "Tower Princess", "id": 159000000, "level": 14, "maxLevel": 16, "rarity": "common", "count": 12, "iconUrls": { "medium": "https://api-assets.clashroyale.com/supportcards/300/synthetic-tower-princess.png" } }
+  ],
+  "currentDeck": [
+    { "name": "Knight", "id": 26000000, "level": 11, "starLevel": 2, "evolutionLevel": 1, "maxLevel": 16, "maxEvolutionLevel": 1, "rarity": "common", "count": 0, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-knight.png" } },
+    { "name": "Archers", "id": 26000001, "level": 14, "evolutionLevel": 1, "maxLevel": 16, "maxEvolutionLevel": 1, "rarity": "common", "count": 118, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-archers.png" } },
+    { "name": "Minions", "id": 26000005, "level": 16, "maxLevel": 16, "rarity": "common", "count": 3402, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-minions.png" } },
+    { "name": "Giant", "id": 26000003, "level": 9, "starLevel": 1, "maxLevel": 14, "rarity": "rare", "count": 47, "elixirCost": 5, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-giant.png" } },
+    { "name": "Musketeer", "id": 26000014, "level": 14, "maxLevel": 14, "maxEvolutionLevel": 1, "rarity": "rare", "count": 906, "elixirCost": 4, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-musketeer.png" } },
+    { "name": "Golem", "id": 26000009, "level": 11, "maxLevel": 11, "rarity": "epic", "count": 214, "elixirCost": 8, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-golem.png" } },
+    { "name": "Miner", "id": 26000032, "level": 8, "maxLevel": 8, "rarity": "legendary", "count": 63, "elixirCost": 3, "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-miner.png" } }
+  ],
+  "currentFavouriteCard": { "name": "Miner", "id": 26000032, "maxLevel": 8, "rarity": "legendary", "iconUrls": { "medium": "https://api-assets.clashroyale.com/cards/300/synthetic-miner.png" } }
+}

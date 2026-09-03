@@ -10,6 +10,8 @@
  * one place that formula lives, and it is not here.
  */
 
+import { displayedLevel } from "./cardLevels";
+
 /** Per-card curve: each level below the cap costs ~10% of the card's fit. */
 export const LEVEL_BASE = 1.1;
 
@@ -92,4 +94,44 @@ export function wilsonLowerBound(wins: number, losses: number): number {
 /** The final ranking number. Scaled by 100 purely so it reads as a percentage. */
 export function score(quality: number, fit: number): number {
   return quality * fit * 100;
+}
+
+/** A card the player owns, as it appears in a player response's `.cards[]`. */
+export interface OwnedCard {
+  id: number;
+  level: number;
+  maxLevel: number;
+}
+
+/** A player's cards, resolved to displayed levels once so nothing re-derives them. */
+export interface Collection {
+  globalMax: number;
+  /** Card id to displayed level. Absence from this map is what "does not own" means. */
+  levels: ReadonlyMap<number, number>;
+}
+
+/**
+ * Resolve a player's cards to displayed levels, once, up front.
+ *
+ * Takes an **explicit array** and an explicit cap, for the same reason
+ * `globalMaxLevel` does: a player response carries `maxLevel` at six different
+ * paths and `.badges[]` is achievement tiers on an unrelated scale. Hand this
+ * `player.cards`, never `player`.
+ *
+ * `globalMax` must come from the **catalogue**, not from these cards. A player
+ * with a small collection may own no card of the highest-capped rarity, which
+ * would silently lower the cap and inflate their every `levelFit`.
+ */
+export function buildCollection(owned: readonly OwnedCard[], globalMax: number): Collection {
+  if (!Array.isArray(owned)) {
+    throw new TypeError(
+      "buildCollection expects an array of cards, not a whole player response. " +
+        "Pass player.cards — a player response also carries maxLevel on badges, " +
+        "which are not card levels.",
+    );
+  }
+
+  const levels = new Map<number, number>();
+  for (const card of owned) levels.set(card.id, displayedLevel(card, globalMax));
+  return { globalMax, levels };
 }

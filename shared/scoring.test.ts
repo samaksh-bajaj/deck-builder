@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { levelFit, score, wilsonLowerBound } from "./scoring";
+import { buildCollection, levelFit, score, wilsonLowerBound } from "./scoring";
+import { globalMaxLevel } from "./cardLevels";
+import catalogue from "../fixtures/cards.json" with { type: "json" };
+import player from "../testdata/synthetic-player.json" with { type: "json" };
 
 /**
  * Decks are written as per-card offsets below the cap — 0 is maxed, -2 is two
@@ -133,5 +136,37 @@ describe("score", () => {
 
   it("collapses to zero when a deck wins nothing, however well levelled", () => {
     expect(score(wilsonLowerBound(0, 60), fitOf(MAXED, 16))).toBe(0);
+  });
+});
+/**
+ * The synthetic player owns 12 cards. Hand-built and structurally derived from a
+ * real capture — it proves the selection code handles a player shape, it does
+ * not establish what that shape is. See testdata/synthetic-player.json.
+ */
+const items = catalogue.items;
+const globalMax = globalMaxLevel(items);
+const collection = buildCollection(player.cards, globalMax);
+
+describe("buildCollection", () => {
+  it("refuses a whole player response, naming the mistake", () => {
+    // The trap this signature exists to close: a player response carries
+    // maxLevel on badges too, on a completely unrelated achievement scale.
+    expect(() => buildCollection(player as never, globalMax)).toThrow(/not a whole player response/);
+  });
+
+  it("does not see badges, which carry maxLevel on another scale entirely", () => {
+    // Vacuous unless the fixture actually contains the trap, so check that too.
+    expect(player.badges.some((badge) => typeof badge.maxLevel === "number")).toBe(true);
+    for (const badge of player.badges) expect(collection.levels.has(badge.level)).toBe(false);
+    expect(collection.levels.size).toBe(player.cards.length);
+  });
+
+  it("puts a maxed card of every rarity on the same displayed level", () => {
+    // The synthetic player is maxed in all five rarities at five different raw
+    // levels. If buildCollection ever stopped applying the rarity offset, four
+    // of these five would drop out.
+    const maxed = player.cards.filter((card) => card.level === card.maxLevel);
+    expect(new Set(maxed.map((card) => card.maxLevel)).size).toBe(5);
+    for (const card of maxed) expect(collection.levels.get(card.id)).toBe(globalMax);
   });
 });
