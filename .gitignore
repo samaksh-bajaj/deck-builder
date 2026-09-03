@@ -9,7 +9,9 @@ dist
 
 .captures
 
-# fixtures/ holds only responses with no personal data. Player and battlelog
-# captures stay local; generate your own with `npm run fixtures`.
+# fixtures/ holds only responses with no personal data. Captures that carry
+# identities stay local; generate your own with `npm run fixtures`.
 fixtures/player.json
 fixtures/player-battlelog.json
+# 1000 real players — the largest identity payload in the project.
+fixtures/rankings.json

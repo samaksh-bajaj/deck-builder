@@ -21,7 +21,11 @@ import { describe, expect, it } from "vitest";
 const ALLOWED = ["cards.json"];
 
 /** Captures that must stay local, and must remain gitignored. */
-const MUST_STAY_LOCAL = ["fixtures/player.json", "fixtures/player-battlelog.json"];
+const MUST_STAY_LOCAL = [
+  "fixtures/player.json",
+  "fixtures/player-battlelog.json",
+  "fixtures/rankings.json",
+];
 
 function git(args: string[]): string {
   try {
@@ -71,4 +75,40 @@ describe("fixtures/", () => {
       expect(() => JSON.parse(readFileSync(`fixtures/${file}`, "utf8"))).not.toThrow();
     }
   });
+});
+
+const trackedTestdata = git(["ls-files", "--", "testdata"])
+  .split("\n")
+  .filter((line) => line.endsWith(".json"));
+
+describe("testdata/", () => {
+  // testdata/ is the opposite of fixtures/: hand-built inputs that were never
+  // captured from anything. A synthetic file that got mistaken for a real
+  // capture would be worse than no fixture at all, because nobody could tell
+  // afterwards which one they were reading.
+  it("actually has files to check", () => {
+    // Without this, both checks below pass vacuously the day someone moves or
+    // renames the directory — a guard that silently stops guarding.
+    expect(trackedTestdata.length).toBeGreaterThan(0);
+  });
+
+  it("labels every file synthetic in its name", () => {
+    for (const path of trackedTestdata) {
+      expect(path).toMatch(/^testdata\/synthetic-[\w-]+\.json$/);
+    }
+  });
+
+  it("labels every file synthetic on the inside too", () => {
+    // Both halves are checked, and neither is redundant: the filename survives
+    // a copy into fixtures/ while the in-file key does not, and the key
+    // survives a rename while the filename does not.
+    for (const path of trackedTestdata) {
+      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      expect((parsed as { _synthetic?: unknown })._synthetic).toBe(true);
+    }
+  });
+
+  // Deliberately no tag scan here, unlike fixtures/ above. A synthetic
+  // placeholder tag is tag-shaped on purpose, and rejecting it would force
+  // these files to stop exercising the parsing they exist to exercise.
 });

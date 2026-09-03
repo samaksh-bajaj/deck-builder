@@ -1,0 +1,71 @@
+{
+  "_synthetic": true,
+  "_note": "Hand-built, never captured. Structurally derived from a real /locations/global/pathoflegend/players response: the {items, paging} envelope, empty paging.cursors, and the key order tag,name,expLevel,eloRating,rank[,clan]. Carries the traps a real response has — a clanless entry (121 of 1000 in the observed capture), a name that is bare digits, and a short name — at a size a test can read. Ranks are contiguous from 1 like the real response, but this is 6 entries and not 1000: never assert a seed count against it.",
+  "items": [
+    {
+      "tag": "#LQVR08PGG",
+      "name": "Synthetic One",
+      "expLevel": 90,
+      "eloRating": 3785,
+      "rank": 1,
+      "clan": {
+        "tag": "#R88G09UY",
+        "name": "Synthetic Clan",
+        "badgeId": 16000133
+      }
+    },
+    {
+      "tag": "#RVY8V092",
+      "name": "90",
+      "expLevel": 90,
+      "eloRating": 3726,
+      "rank": 2
+    },
+    {
+      "tag": "#2YL0CJUR",
+      "name": "Qk",
+      "expLevel": 74,
+      "eloRating": 3702,
+      "rank": 3,
+      "clan": {
+        "tag": "#9PV82LUQ",
+        "name": "Synthetic Clan Two",
+        "badgeId": 16000000
+      }
+    },
+    {
+      "tag": "#8QRVGY0LC",
+      "name": "Synthetic Four",
+      "expLevel": 61,
+      "eloRating": 3688,
+      "rank": 4
+    },
+    {
+      "tag": "#PCUY9L2R0",
+      "name": "Synthetic Five",
+      "expLevel": 90,
+      "eloRating": 3654,
+      "rank": 5,
+      "clan": {
+        "tag": "#YVU2R0Q8",
+        "name": "Synthetic Clan Three",
+        "badgeId": 16000047
+      }
+    },
+    {
+      "tag": "#LV8G2R9UY",
+      "name": "Synthetic Six",
+      "expLevel": 55,
+      "eloRating": 3611,
+      "rank": 6,
+      "clan": {
+        "tag": "#R88G09UY",
+        "name": "Synthetic Clan",
+        "badgeId": 16000133
+      }
+    }
+  ],
+  "paging": {
+    "cursors": {}
+  }
+}
