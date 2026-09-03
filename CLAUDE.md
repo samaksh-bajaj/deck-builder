@@ -205,9 +205,38 @@ side — it only means this sample had none. Keep the recursive walk.
 
 ## Scoring
 
-- `levelFit = mean(1.1 ^ (level - GLOBAL_MAX))` across the 8 cards.
-- `quality` = Wilson lower bound on win rate, with a **30-battle minimum**.
-- `score = quality * levelFit * 100`.
+```
+fit_i    = LEVEL_BASE ^ (displayedLevel_i - GLOBAL_MAX)      LEVEL_BASE = 1.1
+levelFit = (1 - MIN_WEIGHT) * mean(fit_i) + MIN_WEIGHT * min(fit_i)
+quality  = Wilson lower bound on win rate, with a 30-battle minimum
+score    = quality * levelFit * 100
+```
+
+Levels are always **displayed** levels (see Card levels). Every constant is
+named in `shared/scoring.ts`; none of them appear inline.
+
+**`min` is what penalizes one badly underlevelled card. The exponential does
+not — it does the reverse.** `1.1 ^ (level - GLOBAL_MAX)` is convex, so by
+Jensen's inequality a plain `mean` over the 8 cards *rewards* concentrating a
+deficit. At a cap of 16, seven maxed cards plus one whose fit is 0 scores
+7/8 = 0.875, beating eight coherent cards two levels below max at 0.826 — a slot
+the player effectively cannot use came out ahead of a whole mediocre deck. The
+mean measures how good a collection is on average; it cannot see a hole. The
+`min` term is what sees the hole, and the exponential is just a reasonable
+per-card curve.
+
+`MIN_WEIGHT = 0.3` is the smallest value satisfying the three properties pinned
+in `shared/scoring.test.ts`; the binding constraint is "7 maxed + 1 unusable"
+< "8 two below max", which needs `w > 0.1179`. **It is a defensible default, not
+a tuned parameter** — nothing here has been calibrated against real win rates.
+
+One comparison was considered and **deliberately not pinned**: "7 maxed + 1 six
+below" vs "8 uniformly two below". Under `w = 0.3` those sit almost level
+(0.8312 vs 0.8264), and that is correct — seven maxed cards with one weak card
+is a strong deck with a hole, while eight cards uniformly two below is mediocre
+throughout. Forcing the first below the second would need `w > 0.3126`. If you
+find yourself raising `MIN_WEIGHT` to "fix" those two being close, don't; this
+is the note saying it was looked at.
 
 Decks containing cards the player does not own are **filtered out, not scored as
 zero** — a zero score still lets a deck win a comparison against other zeros, and
@@ -216,6 +245,15 @@ recommending an unbuildable deck is the single worst output this app can produce
 Fallback ladder: if strict filtering returns nothing, relax to allow **one**
 missing card and flag it in the response. If that still returns nothing, return a
 clear message. Never silently return a deck the player cannot build.
+
+**The ownership filter and the 30-battle filter are independent, and the ladder
+relaxes only ownership.** A deck must never become eligible by having too little
+data. The battle minimum is a filter and not a floor on `n`: flooring would
+fabricate evidence, producing a number shaped like a confidence bound that is not
+one, and silencing the "we don't know enough yet" signal Wilson exists to give.
+How many decks each filter removed must be **observable in the result**, so that
+a crawler regression that drops volume shows up as a number rather than as the
+site quietly recommending from a pool of ten.
 
 ## Where decks.json comes from
 
