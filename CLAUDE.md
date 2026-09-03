@@ -19,14 +19,23 @@ api/        Vercel functions. best-deck.ts holds all the logic.
 shared/     types + scoring, imported by src/, api/, scripts/
 scripts/    tsx-run scripts (fixture capture, crawler)
 fixtures/   real captured API responses only
-public/     decks.json, cards.json
+testdata/   hand-built synthetic test inputs; never captures
+public/     decks.json; cards.json has NOT landed yet
 ```
 
 Flat at the repo root with plain relative imports (`../shared/types`). No `web/`
 directory, no workspaces, no path aliases — see the TypeScript section for why.
 
-All logic lives in `api/best-deck.ts`. The browser fetches that endpoint and
-renders the answer; it does not score, filter, or normalize anything.
+The browser does no computation. It fetches `/api/best-deck` and renders the
+answer; it does not score, filter, or normalize anything.
+
+`shared/scoring.ts` holds the scoring and selection logic, kept free of I/O so it
+runs offline under vitest. `api/best-deck.ts` is the only place that orchestrates
+— fetch the player, call scoring, shape the response — and it is **still a stub**
+that returns `status: "stub"`. Nothing is wired to the live API yet.
+
+The card catalogue currently exists only as `fixtures/cards.json`. Everything
+needing it takes it as an argument, so nothing has to care where it came from.
 
 **No `vercel.json`.** Vercel's Root Directory stays the repo root, which is its
 default Vite layout. Do not add an SPA catch-all rewrite — the app is one page
@@ -124,6 +133,15 @@ Because of all that, `globalMaxLevel()` **takes an explicit array**, never the
 whole `/cards` response. The caller decides what is in scope, so the decision is
 visible at the call site instead of buried in a helper.
 
+`buildCollection()` in `shared/scoring.ts` follows the same rule on the player
+side: hand it `player.cards`, never `player`. Both functions throw and name the
+mistake rather than quietly folding in `badges`.
+
+**`buildCollection`'s `globalMax` argument must come from the catalogue**, not
+from the player's own cards. A player with a small collection may own no card of
+the highest-capped rarity, and deriving the cap from what they happen to own
+would silently lower it and inflate their every `levelFit`.
+
 ## Fixtures
 
 **Never write a parser against a guessed API response shape.** Read a real
@@ -148,10 +166,11 @@ they cannot be committed by accident, and `scripts/fixtures.test.ts` fails CI if
 anything outside the allowlist appears in `fixtures/` — `.gitignore` alone is a
 convention, a failing test is a rule.
 
-**Two directories, and the distinction matters:**
+**Three directories, and the distinctions matter:**
 
 - `.captures/` — gitignored, byte-exact, the raw truth. Never committed.
 - `fixtures/` — committed, PII-free captures only, redacted regardless.
+- `testdata/` — committed, hand-built, never captured from anything. See below.
 
 The redaction pipeline and leak check still apply to everything. They are what
 make the local `.captures/` files safe to hand to someone on request.
@@ -162,6 +181,20 @@ structurally derived from a real capture, and labelled synthetic in the filename
 and in a `_synthetic` key so it can never be mistaken for one. Never move a
 synthetic file into `fixtures/`, and never write a parser against it: it proves
 a parser handles a shape, it does not establish what the shape is.
+
+Both halves of that labelling are **enforced by `scripts/fixtures.test.ts`**,
+not left to discipline: every tracked file in `testdata/` must match
+`synthetic-*.json` and carry `_synthetic: true`. Both are checked because the
+filename survives a copy into `fixtures/` and the in-file key does not. The tag
+scan that guards `fixtures/` is deliberately **not** applied to `testdata/` — a
+synthetic placeholder tag is tag-shaped on purpose.
+
+Today that directory holds `synthetic-player.json`: a low-collection player
+carrying the traps a real capture has — `badges[]` with `maxLevel` on the
+achievement scale, `currentDeck` at length 7, a card with no `elixirCost`,
+`count: 0` on an owned card, and a maxed card in each of the five rarities. It is
+deliberately **not** sized against `public/decks.json`; pinning a test to data
+the crawler will overwrite makes it fail for reasons unrelated to the code.
 
 Redaction is structure-preserving: key order and every non-identifying value
 (levels, `maxLevel`, timestamps, crowns) are untouched, and placeholder tags keep
@@ -212,8 +245,18 @@ quality  = Wilson lower bound on win rate, with a 30-battle minimum
 score    = quality * levelFit * 100
 ```
 
-Levels are always **displayed** levels (see Card levels). Every constant is
-named in `shared/scoring.ts`; none of them appear inline.
+Levels are always **displayed** levels (see Card levels). Every constant is named
+in `shared/scoring.ts` — `LEVEL_BASE = 1.1`, `MIN_WEIGHT = 0.3`,
+`WILSON_Z = 1.96` (a 95% lower bound), `MIN_BATTLES = 30` — and none of them
+appear inline.
+
+A missing card, in the relaxed tier below, is priced at level 1 **on the
+displayed scale**, via `displayedLevel({ level: 1, maxLevel: … })`. Never a bare
+`1` in the exponent: an unlocked Champion starts far above an unlocked Common,
+and a literal would punish the two identically when the game does not. The term
+enters both the `mean` and the `min`, so `levelFit` stays a blend over all 8
+slots — averaging only the 7 owned cards would let a deck score *higher* for
+having a hole in it, since dropping the weakest slot raises a mean.
 
 **`min` is what penalizes one badly underlevelled card. The exponential does
 not — it does the reverse.** `1.1 ^ (level - GLOBAL_MAX)` is convex, so by
@@ -349,6 +392,12 @@ everywhere for consistency. **This applies to `cards.json` when it lands too.**
 Do not work around this by reading the file with `fs`. The static import is what
 causes Vercel's tracer to include the JSON in the function bundle; switching to
 `fs` trades a loud cold-start crash for a missing file at runtime.
+
+**Tests only run from `shared/` and `scripts/`.** `vite.config.ts` sets
+`include: ["shared/**/*.test.ts", "scripts/**/*.test.ts"]`, so a test file
+anywhere else — `api/`, `src/`, `testdata/` — is silently never executed. It does
+not fail; it simply does not run, and the suite stays green. Put the test in
+`shared/`, or widen the glob deliberately.
 
 ## Workflow
 
