@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { buildCollection, levelFit, score, wilsonLowerBound } from "./scoring";
+import {
+  buildCollection,
+  levelFit,
+  MIN_BATTLES,
+  recommendDeck,
+  score,
+  wilsonLowerBound,
+} from "./scoring";
+import type { Collection, Recommendation } from "./scoring";
+import type { Deck } from "./types";
 import { globalMaxLevel } from "./cardLevels";
 import catalogue from "../fixtures/cards.json" with { type: "json" };
+import decksFile from "../public/decks.json" with { type: "json" };
 import player from "../testdata/synthetic-player.json" with { type: "json" };
 
 /**
@@ -168,5 +178,114 @@ describe("buildCollection", () => {
     const maxed = player.cards.filter((card) => card.level === card.maxLevel);
     expect(new Set(maxed.map((card) => card.maxLevel)).size).toBe(5);
     for (const card of maxed) expect(collection.levels.get(card.id)).toBe(globalMax);
+  });
+});
+
+/** Real catalogue ids the synthetic player does not own. */
+const BALLOON = 26000006;
+
+/** Inline decks, so no assertion here depends on public/decks.json's contents. */
+function deck(cards: number[], wins = 600, losses = 400): Deck {
+  return { cards, wins, losses };
+}
+const FULLY_OWNED = [26000000, 26000001, 26000003, 26000004, 26000005, 26000009, 26000014, 26000023]; // prettier-ignore
+const ONE_MISSING = [26000000, 26000001, 26000003, 26000004, 26000005, BALLOON, 26000009, 26000014]; // prettier-ignore
+const UNKNOWN_CARD = [...FULLY_OWNED.slice(0, 7), 99999999];
+
+/**
+ * The invariant this module exists to protect: a recommended deck is one the
+ * player can actually build. Recommending a deck someone cannot build is the
+ * single worst output this app can produce, so it is asserted rather than
+ * reasoned about.
+ */
+function expectNeverUnbuildable(result: Recommendation, owned: Collection): void {
+  if (result.status === "none") return;
+  for (const id of result.deck.deck.cards) expect(owned.levels.has(id)).toBe(true);
+}
+
+describe("recommendDeck", () => {
+  it("recommends a deck the player owns outright", () => {
+    const result = recommendDeck([deck(FULLY_OWNED)], collection, items);
+
+    expect(result.status).toBe("ok");
+    expectNeverUnbuildable(result, collection);
+    expect(result.counts).toMatchObject({ total: 1, buildable: 1 });
+  });
+
+  it("picks the highest scoring of several buildable decks", () => {
+    const worse = deck(FULLY_OWNED, 501, 499);
+    const better = deck(FULLY_OWNED, 900, 100);
+    const result = recommendDeck([worse, better], collection, items);
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.deck.deck).toBe(better);
+  });
+
+  it("filters out a deck with a card the player lacks rather than scoring it zero", () => {
+    // Scored as zero it could still win a comparison against other zeros. The
+    // answer is that it is not a candidate at all.
+    const result = recommendDeck([deck(ONE_MISSING)], collection, items);
+
+    expect(result.status).toBe("none");
+    expect(result.counts).toMatchObject({ total: 1, buildable: 0, unknownCard: 0 });
+  });
+
+  it("gives a clear message rather than throwing when nothing fits", () => {
+    const result = recommendDeck([deck(ONE_MISSING)], collection, items);
+
+    if (result.status !== "none") return;
+    expect(result.message).toMatch(/card you do not own/);
+  });
+
+  it("never lets a deck qualify by having too little data", () => {
+    // Every card owned, but not enough battles to rank. The battle gate is
+    // independent of ownership and nothing may relax it.
+    const thin = deck(FULLY_OWNED, MIN_BATTLES - 20, 8);
+    expect(thin.wins + thin.losses).toBeLessThan(MIN_BATTLES);
+
+    const result = recommendDeck([thin], collection, items);
+    expect(result.status).toBe("none");
+    expect(result.counts).toMatchObject({ belowMinBattles: 1, buildable: 0 });
+  });
+
+  it("drops a deck naming a card the catalogue has never heard of", () => {
+    // decks.json and cards.json out of sync. Should be a number, not a crash,
+    // and distinct from the player merely not owning the card.
+    const result = recommendDeck([deck(UNKNOWN_CARD)], collection, items);
+
+    expect(result.status).toBe("none");
+    expect(result.counts.unknownCard).toBe(1);
+  });
+
+  it("counts every deck that fell out, so a collapsed pool is visible", () => {
+    // If a crawler regression drops volume, this is the number that shows it
+    // instead of the site quietly recommending from a pool of one.
+    const result = recommendDeck(
+      [deck(FULLY_OWNED), deck(FULLY_OWNED, 10, 10), deck(ONE_MISSING), deck(UNKNOWN_CARD)],
+      collection,
+      items,
+    );
+
+    expect(result.counts).toEqual({
+      total: 4,
+      belowMinBattles: 1,
+      unknownCard: 1,
+      buildable: 1,
+    });
+  });
+});
+
+describe("against the real public/decks.json", () => {
+  // Shape and safety only. The crawler replaces this file wholesale, so a test
+  // asserting which deck wins, or that one is found at all, would fail the day
+  // the data changes rather than the day this code breaks.
+
+  it("returns a known status and never a deck the player cannot build", () => {
+    const result = recommendDeck(decksFile.decks, collection, items);
+
+    expect(["ok", "none"]).toContain(result.status);
+    expectNeverUnbuildable(result, collection);
+    expect(result.counts.total).toBe(decksFile.decks.length);
   });
 });
