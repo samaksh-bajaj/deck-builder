@@ -44,6 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks(); // the retry tests spy on Math.random to pin the jitter
   vi.useRealTimers();
 });
 
@@ -196,11 +197,168 @@ describe("rate limiting", () => {
   });
 
   it("keeps serving requests after one fails", async () => {
+    // 400, not 500: this test is about the gate re-arming after a rejection,
+    // and a retryable status would succeed on its second attempt and never
+    // exercise that. See the retry block below for the 5xx path.
     let call = 0;
-    stubFetch(() => (++call === 1 ? new Response("boom", { status: 500 }) : ok()));
+    stubFetch(() => (++call === 1 ? new Response("bad", { status: 400 }) : ok()));
     const { crFetchText } = await loadClient();
 
     await expect(crFetchText("/cards")).rejects.toThrow();
     await expect(crFetchText("/cards")).resolves.toBe("{}");
+  });
+});
+
+describe("retries", () => {
+  /** Long enough to outrun any backoff this client can compute. */
+  const PAST_ALL_BACKOFF = 120_000;
+
+  /** Runs `work` to completion with the virtual clock wound forward. */
+  async function settle<T>(work: Promise<T>): Promise<T> {
+    const caught = work.catch((error: unknown) => error as T);
+    await vi.advanceTimersByTimeAsync(PAST_ALL_BACKOFF);
+    return caught;
+  }
+
+  it("retries a 429 and returns the eventual success", async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    stubFetch(() =>
+      ++call === 1 ? new Response("slow down", { status: 429 }) : ok(),
+    );
+    const { crFetchText } = await loadClient();
+
+    await expect(settle(crFetchText("/cards"))).resolves.toBe("{}");
+    expect(call).toBe(2);
+  });
+
+  it("gives up after CR_MAX_RETRIES and reports the attempt count", async () => {
+    vi.stubEnv("CR_MAX_RETRIES", "2");
+    vi.useFakeTimers();
+    const fetchSpy = stubFetch(() => new Response("boom", { status: 503 }));
+    const { crFetchText, CrApiError } = await loadClient();
+
+    const error = await settle(crFetchText("/cards"));
+
+    // "gave up after N" is a different signal from "failed once" — it means the
+    // API was down, not that this one tag is bad, and the crawler reports them
+    // separately.
+    expect(error).toBeInstanceOf(CrApiError);
+    expect(error).toMatchObject({ status: 503, attempts: 3 });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("never retries a 403, so an IP-allowlist failure stays instant", async () => {
+    // The whole point of not retrying: this is the likeliest first-run failure,
+    // and backoff would turn one clear message into a slow confusing one.
+    const fetchSpy = stubFetch(() => new Response("denied", { status: 403 }));
+    const { crFetchText } = await loadClient();
+
+    await expect(crFetchText("/cards")).rejects.toThrow(/allowed-IP list/);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("never retries a 404, which at crawler scale is a deleted account", async () => {
+    const fetchSpy = stubFetch(() => new Response("nope", { status: 404 }));
+    const { crFetchText } = await loadClient();
+
+    await expect(crFetchText("/players/%23GONE")).rejects.toThrow();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("waits as long as Retry-After asks, rather than guessing", async () => {
+    vi.useFakeTimers();
+    const at: number[] = [];
+    let call = 0;
+    stubFetch(() => {
+      at.push(Date.now());
+      return ++call === 1
+        ? new Response("slow", { status: 429, headers: { "Retry-After": "7" } })
+        : ok();
+    });
+    const { crFetchText } = await loadClient();
+    const start = Date.now();
+
+    await settle(crFetchText("/cards"));
+
+    expect(at[1] - start).toBe(7000);
+  });
+
+  it("caps Retry-After so one hostile header cannot stall a whole crawl", async () => {
+    vi.useFakeTimers();
+    const at: number[] = [];
+    let call = 0;
+    stubFetch(() => {
+      at.push(Date.now());
+      return ++call === 1
+        ? new Response("slow", { status: 429, headers: { "Retry-After": "99999" } })
+        : ok();
+    });
+    const { crFetchText } = await loadClient();
+    const start = Date.now();
+
+    await settle(crFetchText("/cards"));
+
+    expect(at[1] - start).toBe(30_000);
+  });
+
+  it("makes retries wait their turn in the rate limiter", async () => {
+    // The load-bearing one. A retry that skipped acquireSlot() would let
+    // backoff dispatch outside the limiter, so the server telling us to slow
+    // down would make us speed up. Jitter is pinned to zero so that the
+    // limiter is the only thing that can space these dispatches apart.
+    vi.stubEnv("CR_MAX_RETRIES", "3");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.useFakeTimers();
+    const at: number[] = [];
+    stubFetch(() => {
+      at.push(Date.now());
+      return new Response("boom", { status: 503 });
+    });
+    const { crFetchText } = await loadClient();
+
+    const all = Promise.allSettled(
+      Array.from({ length: 4 }, () => crFetchText("/cards")),
+    );
+    await vi.advanceTimersByTimeAsync(PAST_ALL_BACKOFF);
+    await all;
+
+    expect(at).toHaveLength(16); // 4 callers x 4 attempts each
+    const busiest = Math.max(
+      ...at.map((t0) => at.filter((t) => t >= t0 && t - t0 < 1000).length),
+    );
+    expect(busiest).toBeLessThanOrEqual(5);
+  });
+
+  it("retries a transport failure and rethrows the original error", async () => {
+    vi.stubEnv("CR_MAX_RETRIES", "1");
+    vi.useFakeTimers();
+    const transport = new TypeError("fetch failed");
+    const fetchSpy = stubFetch(() => {
+      throw transport;
+    });
+    const { crFetchText } = await loadClient();
+
+    // Rethrown unchanged, not wrapped: there is no status here, and inventing
+    // one would put a number in the crawler's report that no server ever sent.
+    await expect(settle(crFetchText("/cards"))).resolves.toBe(transport);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry at all when CR_MAX_RETRIES is 0", async () => {
+    vi.stubEnv("CR_MAX_RETRIES", "0");
+    const fetchSpy = stubFetch(() => new Response("boom", { status: 503 }));
+    const { crFetchText } = await loadClient();
+
+    await expect(crFetchText("/cards")).rejects.toThrow();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a nonsense retry count rather than falling back silently", async () => {
+    vi.stubEnv("CR_MAX_RETRIES", "-1");
+    stubFetch(ok);
+    const { crFetchText } = await loadClient();
+
+    await expect(crFetchText("/cards")).rejects.toThrow(/CR_MAX_RETRIES/);
   });
 });
