@@ -72,3 +72,30 @@ describe("fixtures/", () => {
     }
   });
 });
+
+const trackedTestdata = git(["ls-files", "--", "testdata"])
+  .split("\n")
+  .filter((line) => line.endsWith(".json"));
+
+describe("testdata/", () => {
+  // The sibling rule to the allowlist above. fixtures/ is real captures with no
+  // personal data; testdata/ is hand-built shapes that were never captured at
+  // all. Confusing the two is how a fabricated file ends up being cited as
+  // evidence of what an endpoint returns, so both halves of the labelling —
+  // the filename and the in-file key — are enforced rather than remembered.
+
+  it("holds at least one file, so the checks below are not vacuous", () => {
+    expect(trackedTestdata.length).toBeGreaterThan(0);
+  });
+
+  it("names every file so it cannot be mistaken for a capture", () => {
+    for (const path of trackedTestdata) expect(path).toMatch(/^testdata\/synthetic-[\w-]+\.json$/);
+  });
+
+  it("marks every file synthetic from the inside too", () => {
+    // The filename survives a copy into fixtures/; a key in the body does not.
+    for (const path of trackedTestdata) {
+      expect(JSON.parse(readFileSync(path, "utf8"))._synthetic).toBe(true);
+    }
+  });
+});
