@@ -12,6 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { crFetchText } from "../shared/crClient";
 import { encodeTag, normalizeTag } from "../shared/tags";
+import { rankingsPath } from "../shared/rankings";
 import { createRedactor } from "./redact";
 import { assertNoIdentityLeak } from "./checkRedaction";
 import { summarize } from "./inspect";
@@ -33,11 +34,14 @@ fixtures/. If any real tag or display name would survive, the run aborts and
 writes nothing.
 `.trim();
 
-/** Endpoint path builder -> committed filename. */
+/** Endpoint path builder -> filename. */
 const ENDPOINTS = [
   { file: "cards.json", path: () => "/cards" },
   { file: "player.json", path: (t: string) => `/players/${t}` },
   { file: "player-battlelog.json", path: (t: string) => `/players/${t}/battlelog` },
+  // Ignores the tag: the crawler's seed list is nobody's account in particular.
+  // 1000 real players, so it stays local like the two above.
+  { file: "rankings.json", path: () => rankingsPath() },
 ];
 
 function parseArgs(argv: readonly string[]) {

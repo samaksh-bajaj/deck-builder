@@ -137,16 +137,21 @@ captured — every path, its types, array lengths, and the full value set for
 low-cardinality fields. It discovers keys rather than assuming them, so reading
 a response is a command rather than a discipline. Use it before writing a parser.
 
-**`fixtures/` holds only responses with no personal data.** Today that is
-`cards.json` and nothing else. Player and battlelog captures are **never
-committed, not even redacted** — they are a snapshot of one arbitrary account
-plus ~59 strangers, and they buy nothing that a local capture does not. Anyone
-working on this repo generates their own with `npm run fixtures`.
+**Captures containing personal data are NEVER committed, redacted or not.** They
+live in gitignored `.captures/`. `fixtures/` holds only responses with no
+personal data — today that is `cards.json` alone. Tests that need a
+people-bearing shape use a hand-built `testdata/synthetic-*.json` derived from a
+real local capture.
 
-`fixtures/player.json` and `fixtures/player-battlelog.json` are gitignored so
-they cannot be committed by accident, and `scripts/fixtures.test.ts` fails CI if
-anything outside the allowlist appears in `fixtures/` — `.gitignore` alone is a
-convention, a failing test is a rule.
+State that rule generally, not per endpoint. It has now been applied three times
+— to `player.json`, to `player-battlelog.json`, and to `rankings.json` — and each
+time the previous per-endpoint wording read as though the new endpoint might be
+an exception. It is not. The question to ask of a new capture is only "does this
+carry identities", never "is this one on the list".
+
+Every people-bearing capture is gitignored so it cannot be committed by accident,
+and `scripts/fixtures.test.ts` fails CI if anything outside the allowlist appears
+in `fixtures/` — `.gitignore` alone is a convention, a failing test is a rule.
 
 **Two directories, and the distinction matters:**
 
@@ -262,11 +267,50 @@ Budget: ~1000 seed players at 5 req/s, roughly 4 minutes per run.
 **Do NOT scrape RoyaleAPI or StatsRoyale.** Their terms forbid it and it would
 make our win rates someone else's methodology.
 
-**Which rankings endpoint to seed from is NOT decided yet** — Path of Legends and
-trophy rankings live at different paths and the endpoint is known to be
-unreliable. The crawler PR must capture a real response to `fixtures/` and
-confirm the path before writing a parser. Treat the endpoint as a config value
-with a cached seed list on disk as fallback.
+**The rankings endpoint is now confirmed**, against the live API rather than
+remembered. `/locations` lists 262 locations; the global one exposes two player
+leaderboards, and only one of them works:
+
+| path | status | `items` |
+|---|---|---|
+| `/locations/global/pathoflegend/players` | 200 | **1000** |
+| `/locations/global/rankings/players` | 200 | **0** |
+
+**The trophy leaderboard answers 200 with an empty array.** That is what
+"unreliable" meant, and it is far nastier than a 404: a crawler pointed at it
+seeds zero tags, fetches nothing, aggregates nothing, and reports success. So
+**any seeding path must treat an empty `items` as a failure**, not merely a
+non-2xx status. Guarding only on status code is the bug this table exists to
+prevent.
+
+Envelope is `{ items, paging }`. All 1000 entries arrive in **one request** and
+`paging.cursors` comes back empty, so **there is no pagination to write**.
+`limit` is honoured downward but clamps at 1000 — asking for 2000 returns 1000.
+The seeding budget is therefore exactly one request, not N.
+
+Entry shape is `tag`, `name`, `expLevel`, `eloRating`, `rank`, and an **optional
+`clan`** (`{tag, name, badgeId}`), absent for 121 of 1000 in the observed
+capture. There is no `trophies` field on this leaderboard; the rating is
+`eloRating`. Treat `clan` as sparse — a parser that assumes it is present breaks
+on roughly one entry in eight.
+
+The path stays a config value (`CR_RANKINGS_PATH`, default in
+`shared/rankings.ts`) because an endpoint that can silently start returning
+empty should be repointable by env var rather than by deploy.
+
+**The dedupe key is verified, not assumed.** `(battleTime, sorted player tags)`
+rests on both players' logs recording an identical `battleTime` for the same
+battle, which nothing had checked. Fetching an opponent's battlelog and finding
+the same battle from the other side confirms it: `battleTime` matched to the
+second, the two decks mirrored exactly, and crowns mirrored (0/2 became 2/0).
+
+Only 1 of 6 sampled opponents still had the shared battle in their window, which
+is itself worth knowing — battlelogs are short and cross-log duplicates are
+rarer than "every battle appears twice" suggests. Dedupe is still required for
+correctness; just do not expect it to halve the count.
+
+Battlelogs held **30 and 40** battles in the two accounts sampled, not the ~25
+assumed above. Do not hardcode a per-log battle count.
 
 ## decks.json provenance
 
