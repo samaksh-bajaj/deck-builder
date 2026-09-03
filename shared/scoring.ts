@@ -11,6 +11,7 @@
  */
 
 import { displayedLevel } from "./cardLevels";
+import type { Deck } from "./types";
 
 /** Per-card curve: each level below the cap costs ~10% of the card's fit. */
 export const LEVEL_BASE = 1.1;
@@ -134,4 +135,132 @@ export function buildCollection(owned: readonly OwnedCard[], globalMax: number):
   const levels = new Map<number, number>();
   for (const card of owned) levels.set(card.id, displayedLevel(card, globalMax));
   return { globalMax, levels };
+}
+
+/**
+ * Battles a deck needs before it is allowed into the ranking at all.
+ *
+ * A filter, not a floor on `n`. Decks below it are removed from the pool rather
+ * than scored, and no fallback may relax it — a deck must not become eligible by
+ * having too little data.
+ *
+ * The right number depends on how many battles a crawler run actually yields per
+ * deck, which nothing knows yet. Revisit it here once the crawler lands.
+ */
+export const MIN_BATTLES = 30;
+
+/** The catalogue entry for a card, from `/cards` `.items[]`. */
+export interface CatalogueCard {
+  id: number;
+  name: string;
+  maxLevel: number;
+}
+
+/** How the candidate pool narrowed. Every deck that fell out is counted here. */
+export interface SelectionCounts {
+  total: number;
+  /** Removed by MIN_BATTLES, before ownership was even considered. */
+  belowMinBattles: number;
+  /** Cleared the battle gate but names a card absent from the catalogue. */
+  unknownCard: number;
+  /** Cleared the battle gate and the player owns all 8. */
+  buildable: number;
+}
+
+export interface ScoredDeck {
+  deck: Deck;
+  score: number;
+  quality: number;
+  levelFit: number;
+}
+
+export type Recommendation =
+  | { status: "ok"; deck: ScoredDeck; counts: SelectionCounts }
+  | { status: "none"; message: string; counts: SelectionCounts };
+
+/**
+ * Why a deck is not a candidate, or its 8 displayed levels if it is.
+ *
+ * "unknown" means the deck names a card the catalogue has never heard of, which
+ * is a different problem from the player not owning it: it means decks.json and
+ * cards.json are out of sync. Kept apart so the counts can say which happened.
+ */
+function resolveDeck(
+  deck: Deck,
+  collection: Collection,
+  catalogue: ReadonlyMap<number, CatalogueCard>,
+): number[] | "unowned" | "unknown" {
+  const levels: number[] = [];
+
+  for (const id of deck.cards) {
+    const owned = collection.levels.get(id);
+    if (owned === undefined) return catalogue.has(id) ? "unowned" : "unknown";
+    levels.push(owned);
+  }
+
+  return levels;
+}
+
+/**
+ * The one deck to recommend, or a clear reason there isn't one.
+ *
+ * Two independent gates. The battle gate runs first and once, so nothing added
+ * below it can relax it. Decks containing cards the player does not own are
+ * **filtered out, not scored as zero** — a zero score still lets a deck win a
+ * comparison against other zeros, and recommending a deck someone cannot build
+ * is the single worst output this app can produce.
+ *
+ * CLAUDE.md's fallback ladder — relax to allow one missing card before giving up
+ * — is not here yet. Until it lands this returns "none" where it would relax,
+ * which is the safe direction to be incomplete in.
+ */
+export function recommendDeck(
+  decks: readonly Deck[],
+  collection: Collection,
+  catalogue: readonly CatalogueCard[],
+): Recommendation {
+  const byId = new Map(catalogue.map((card) => [card.id, card]));
+  const counts: SelectionCounts = {
+    total: decks.length,
+    belowMinBattles: 0,
+    unknownCard: 0,
+    buildable: 0,
+  };
+  const candidates: ScoredDeck[] = [];
+
+  for (const deck of decks) {
+    if (deck.wins + deck.losses < MIN_BATTLES) {
+      counts.belowMinBattles++;
+      continue;
+    }
+
+    const levels = resolveDeck(deck, collection, byId);
+    if (levels === "unknown") {
+      counts.unknownCard++;
+      continue;
+    }
+    if (levels === "unowned") continue;
+
+    counts.buildable++;
+    const quality = wilsonLowerBound(deck.wins, deck.losses);
+    const fit = levelFit(levels, collection.globalMax);
+    candidates.push({ deck, score: score(quality, fit), quality, levelFit: fit });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      status: "none",
+      message:
+        `No deck is buildable from your collection. Of ${counts.total} decks, ` +
+        `${counts.belowMinBattles} had too few battles to rank and the rest need at ` +
+        "least one card you do not own.",
+      counts,
+    };
+  }
+
+  return {
+    status: "ok",
+    deck: candidates.reduce((a, b) => (b.score > a.score ? b : a)),
+    counts,
+  };
 }
